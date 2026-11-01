@@ -1,119 +1,711 @@
-// Fungsi server (Vercel) yang menjadi perantara antara halaman web dan Gemini.
-// API key disimpan di server (environment variable), BUKAN di halaman web.
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0a22">
+<title>K.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ff6bb5'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='30' fill='url(%23g)'/%3E%3Ccircle cx='23' cy='28' r='4' fill='%231a1033'/%3E%3Ccircle cx='41' cy='28' r='4' fill='%231a1033'/%3E%3Cpath d='M23 40q9 8 18 0' stroke='%231a1033' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0a22;
+    --card: #1c1442;
+    --card2: #2a1d5e;
+    --line: #3d2d82;
+    --text: #f6f1ff;
+    --dim: #b4a7e0;
+    --pink: #ff5ca8;
+    --lime: #c8ff5a;
+    --ink: #1a1033;
+    --a: #ff6bb5;
+    --b: #8b5cf6;
+    --accent: #ff5ca8;
+  }
+  body[data-state="listening"] { --a: #c8ff5a; --b: #22d3ee; --accent: #c8ff5a; }
+  body[data-state="thinking"]  { --a: #ffd36b; --b: #ff7a59; --accent: #ffd36b; }
+  body[data-state="speaking"]  { --a: #b79bff; --b: #38bdf8; --accent: #8fd3ff; }
 
-const KEPRIBADIAN =
-  "Kamu adalah K.0 (dibaca 'ka nol'), teman ngobrol AI yang asik untuk anak muda Indonesia. " +
-  "Gaya bicaramu santai, hangat, dan sedikit jenaka, memakai bahasa Indonesia gaul sehari-hari " +
-  "(boleh pakai kata seperti 'nih', 'sih', 'banget', 'yuk', 'santai aja'), tetapi jangan berlebihan " +
-  "dan tetap jelas, sopan, serta akurat. Jawab singkat, maksimal 2-3 kalimat, karena jawabanmu akan " +
-  "diucapkan lewat suara. Jangan gunakan emoji, tanda bintang, atau format markdown.";
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    color: var(--text);
+    font-family: "Nunito", ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
+    background:
+      radial-gradient(60% 40% at 8% 0%, rgba(139, 92, 246, .38) 0%, transparent 70%),
+      radial-gradient(55% 40% at 100% 18%, rgba(255, 92, 168, .26) 0%, transparent 70%),
+      radial-gradient(60% 40% at 50% 100%, rgba(34, 211, 238, .12) 0%, transparent 70%),
+      var(--bg);
+  }
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
 
-// Batas tunggu jawaban Gemini. Setelah itu server membalas dengan pesan error
-// (bukan menggantung selamanya).
-const BATAS_WAKTU_MS = 25000;
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 0;
+  }
+  .logo { display: flex; flex-direction: column; line-height: 1.05; }
+  .logo b {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: -.03em;
+    background: linear-gradient(90deg, var(--pink), var(--lime));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    width: fit-content;
+  }
+  .logo small { color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+  .tools { display: flex; gap: 8px; }
+  .icon-btn {
+    width: 42px; height: 42px;
+    display: grid; place-items: center;
+    background: var(--card);
+    color: var(--dim);
+    border: 1.5px solid var(--line);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform .15s, border-color .2s, color .2s;
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--accent); }
+  .icon-btn:active { transform: scale(.92); }
+  .icon-btn[aria-pressed="true"] { color: #ffb3c9; border-color: #a3365f; }
+  .icon-btn svg { width: 20px; height: 20px; }
 
-function buatBody(contents, level) {
-  const body = {
-    system_instruction: { parts: [{ text: KEPRIBADIAN }] },
-    contents,
+  /* ---------- Maskot ---------- */
+  .stage { display: grid; justify-items: center; gap: 8px; padding: 6px 0 2px; }
+  .mascot {
+    position: relative;
+    width: min(42vw, 26dvh, 190px);
+    aspect-ratio: 1;
+    margin-top: 6px;
+  }
+  .glow {
+    position: absolute;
+    inset: -14%;
+    border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--a) 40%, transparent), transparent 66%);
+    filter: blur(6px);
+    transition: background .4s;
+  }
+  .glow::before, .glow::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    opacity: 0;
+  }
+  body[data-state="listening"] .glow::before { animation: ripple 1.6s ease-out infinite; }
+  body[data-state="listening"] .glow::after  { animation: ripple 1.6s ease-out .8s infinite; }
+  @keyframes ripple { 0% { transform: scale(.85); opacity: .7; } 100% { transform: scale(1.45); opacity: 0; } }
+
+  .blob {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(140deg, var(--a), var(--b));
+    border-radius: 58% 42% 55% 45% / 48% 56% 44% 52%;
+    box-shadow: inset -10px -14px 28px rgba(26, 16, 51, .22), inset 8px 10px 22px rgba(255, 255, 255, .28);
+    animation: morph 8s ease-in-out infinite, float 4s ease-in-out infinite;
+    transition: background .4s;
+  }
+  @keyframes morph {
+    50% { border-radius: 44% 56% 46% 54% / 56% 44% 56% 44%; }
+  }
+  @keyframes float { 50% { transform: translateY(-7px); } }
+  body[data-state="speaking"] .blob { animation: morph 3s ease-in-out infinite, bounce .5s ease-in-out infinite alternate; }
+  @keyframes bounce { to { transform: translateY(-5px) scale(1.03); } }
+  body[data-state="thinking"] .blob { animation: morph 2.4s ease-in-out infinite, sway 1.6s ease-in-out infinite; }
+  @keyframes sway { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+
+  .eyes { position: absolute; inset: 0; transition: transform .3s; transform-origin: 50% 45%; }
+  .eye {
+    position: absolute;
+    top: 37%;
+    width: 12%;
+    height: 17%;
+    background: var(--ink);
+    border-radius: 50%;
+    animation: blink 5s infinite;
+  }
+  .eye::after {
+    content: "";
+    position: absolute;
+    top: 14%; left: 22%;
+    width: 30%; height: 28%;
+    background: #fff;
+    border-radius: 50%;
+  }
+  .eye.l { left: 29%; }
+  .eye.r { right: 29%; animation-delay: .06s; }
+  @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
+  body[data-state="listening"] .eyes { transform: scale(1.18); }
+  body[data-state="thinking"] .eyes  { transform: translate(7%, -9%); }
+
+  .cheek {
+    position: absolute;
+    top: 56%;
+    width: 11%;
+    height: 7%;
+    background: rgba(255, 92, 168, .55);
+    border-radius: 50%;
+    filter: blur(1.5px);
+  }
+  .cheek.l { left: 17%; }
+  .cheek.r { right: 17%; }
+
+  .mouth {
+    position: absolute;
+    left: 50%;
+    top: 59%;
+    width: 17%;
+    height: 8%;
+    transform: translateX(-50%);
+    border-bottom: 4px solid var(--ink);
+    border-radius: 0 0 60% 60%;
+    transition: all .25s;
+  }
+  body[data-state="listening"] .mouth {
+    width: 8%; height: 9%;
+    border: 4px solid var(--ink);
+    border-radius: 50%;
+  }
+  body[data-state="thinking"] .mouth {
+    width: 11%; height: 0;
+    border-radius: 0;
+  }
+  body[data-state="speaking"] .mouth {
+    width: 14%; height: 11%;
+    border: none;
+    background: var(--ink);
+    border-radius: 45% 45% 60% 60%;
+    animation: talk .32s ease-in-out infinite alternate;
+  }
+  @keyframes talk { from { transform: translateX(-50%) scaleY(.45); } to { transform: translateX(-50%) scaleY(1.1); } }
+
+  .dots { position: absolute; top: -4%; right: 0; display: none; gap: 5px; }
+  .dots i {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: hop .9s ease-in-out infinite;
+  }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+  body[data-state="thinking"] .dots { display: flex; }
+  @keyframes hop { 50% { transform: translateY(-8px); } }
+
+  .pill {
+    padding: 5px 14px;
+    background: var(--card);
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    transition: color .3s;
+  }
+  #live {
+    min-height: 22px;
+    max-width: 90%;
+    text-align: center;
+    color: var(--text);
+    font-weight: 700;
+    opacity: .9;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .blob, .eye, .mouth, .glow::before, .glow::after, .dots i { animation: none !important; }
+  }
+
+  /* ---------- Chat ---------- */
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg {
+    max-width: 84%;
+    padding: 11px 16px;
+    border-radius: 22px;
+    overflow-wrap: anywhere;
+    animation: pop .3s cubic-bezier(.2, 1.4, .4, 1);
+  }
+  @keyframes pop { from { transform: scale(.85) translateY(8px); opacity: 0; } }
+  .msg p { margin: 0; }
+  .msg.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #7c3aed, #db2777);
+    color: #fff;
+    font-weight: 700;
+    border-bottom-right-radius: 6px;
+    box-shadow: 0 6px 18px rgba(219, 39, 119, .25);
+  }
+  .msg.bot {
+    align-self: flex-start;
+    background: var(--card);
+    border: 1.5px solid var(--line);
+    border-bottom-left-radius: 6px;
+  }
+  .msg.system {
+    align-self: center;
+    max-width: 94%;
+    background: transparent;
+    border: 1.5px dashed var(--line);
+    color: var(--dim);
+    font-size: 14px;
+    text-align: center;
+    border-radius: 16px;
+  }
+  .msg.wait p { letter-spacing: .3em; color: var(--dim); animation: blinkTxt 1.2s infinite; }
+  @keyframes blinkTxt { 50% { opacity: .25; } }
+  .msg a {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 7px 14px;
+    background: var(--lime);
+    color: var(--ink);
+    font-weight: 900;
+    font-size: 14px;
+    border-radius: 999px;
+    text-decoration: none;
+  }
+  .msg a::after { content: " \2197"; }
+
+  #hint { margin: auto; text-align: center; max-width: 360px; }
+  #hint .hello { font-size: 26px; font-weight: 900; letter-spacing: -.02em; margin-bottom: 4px; }
+  #hint p { margin: 0 0 16px; color: var(--dim); }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .chip {
+    background: var(--card);
+    color: var(--text);
+    border: 1.5px solid var(--line);
+    border-radius: 18px;
+    padding: 9px 14px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform .15s, border-color .2s;
+  }
+  .chip:nth-child(odd)  { transform: rotate(-2deg); }
+  .chip:nth-child(even) { transform: rotate(2deg); }
+  .chip:hover { border-color: var(--accent); transform: rotate(0) scale(1.04); }
+  .chip:active { transform: scale(.94); }
+
+  /* ---------- Dock bawah ---------- */
+  .dock {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 12px 12px;
+    padding: 7px 7px 7px 8px;
+    background: rgba(28, 20, 66, .92);
+    border: 1.5px solid var(--line);
+    border-radius: 34px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: border-color .2s;
+  }
+  .dock:focus-within { border-color: var(--accent); }
+  form { flex: 1; display: flex; gap: 6px; margin: 0; min-width: 0; }
+  input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: var(--text);
+    border: none;
+    padding: 12px 10px 12px 14px;
+    font: inherit;
+    font-size: 16px; /* 16px mencegah iOS memperbesar layar saat mengetik */
+    font-weight: 700;
+  }
+  input[type="text"]::placeholder { color: var(--dim); font-weight: 500; }
+  input[type="text"]:focus { outline: none; }
+  .send { width: 44px; height: 44px; flex: none; background: var(--card2); color: var(--text); border-color: transparent; }
+
+  #mic {
+    flex: none;
+    width: 62px; height: 62px;
+    display: grid; place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(140deg, var(--a), var(--b));
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--a) 45%, transparent);
+    transition: transform .15s, background .4s;
+  }
+  #mic:active { transform: scale(.92); }
+  #mic svg { width: 28px; height: 28px; }
+  #mic .stop { display: none; }
+  body[data-state="listening"] #mic .mic-i { display: none; }
+  body[data-state="listening"] #mic .stop { display: block; }
+  body[data-state="listening"] #mic { animation: micPulse 1.3s ease-out infinite; }
+  @keyframes micPulse {
+    0% { box-shadow: 0 0 0 0 rgba(200, 255, 90, .55); }
+    100% { box-shadow: 0 0 0 20px rgba(200, 255, 90, 0); }
+  }
+  #mic:disabled { opacity: .4; cursor: not-allowed; }
+
+  button:focus-visible, a:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+</style>
+</head>
+<body data-state="idle">
+<div class="app">
+
+<header>
+  <div class="logo">
+    <b>K.0</b>
+  </div>
+  <div class="tools">
+    <button class="icon-btn" id="mute" type="button" aria-pressed="false" aria-label="Matikan suara jawaban" title="Suara jawaban">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4z"/><path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
+    </button>
+    <button class="icon-btn" id="reset" type="button" aria-label="Mulai obrolan baru" title="Obrolan baru">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<section class="stage">
+  <div class="mascot" aria-hidden="true">
+    <div class="glow"></div>
+    <div class="blob">
+      <div class="eyes"><span class="eye l"></span><span class="eye r"></span></div>
+      <span class="cheek l"></span><span class="cheek r"></span>
+      <span class="mouth"></span>
+    </div>
+    <div class="dots"><i></i><i></i><i></i></div>
+  </div>
+  <div id="status" class="pill" role="status">online nih</div>
+  <div id="live" aria-live="polite"></div>
+</section>
+
+<main id="log" aria-live="polite" aria-label="Obrolan">
+  <div id="hint">
+    <div class="hello">Hai, aku K.0 &#10024;</div>
+    <p>Pencet mic terus ngomong, atau ketik aja di bawah. Bebas, nggak usah malu-malu.</p>
+    <div class="chips">
+      <button class="chip" type="button" data-q="Jam berapa sekarang?"><span aria-hidden="true">&#9200;</span> Jam berapa sekarang?</button>
+      <button class="chip" type="button" data-q="Ceritain fakta random tentang luar angkasa"><span aria-hidden="true">&#128640;</span> Fakta random luar angkasa</button>
+      <button class="chip" type="button" data-q="Cari resep nasi goreng"><span aria-hidden="true">&#127859;</span> Cari resep nasi goreng</button>
+      <button class="chip" type="button" data-q="Kasih aku satu jokes receh"><span aria-hidden="true">&#128514;</span> Jokes receh dong</button>
+    </div>
+  </div>
+</main>
+
+<div class="dock">
+  <form id="form" autocomplete="off">
+    <input type="text" id="text" placeholder="Ketik apa aja di sini..." enterkeyhint="send" aria-label="Pesan untuk K.0">
+    <button class="icon-btn send" type="submit" aria-label="Kirim">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m5 12 14-7-5 14-2-5z"/>
+      </svg>
+    </button>
+  </form>
+  <button id="mic" type="button" aria-label="Mulai ngomong">
+    <svg class="mic-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
+    </svg>
+    <svg class="stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
+  </button>
+</div>
+
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const LANG = "id-ID";
+  // Sapaan "K.0" yang sering terdengar sebagai "k0", "ka nol", "kenol", dst.
+  const WAKE = /^\s*(?:ok(?:e|ay)?\s+)?(?:k\s?\.?\s?0|k\s?\.?\s?nol|ka\s?nol|ke\s?nol|kay\s?nol)[\s,.:!?-]*/i;
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
   };
-  // "Tingkat berpikir" rendah membuat Gemini 3.x menjawab jauh lebih cepat.
-  if (level) body.generationConfig = { thinkingConfig: { thinkingLevel: level } };
-  return body;
-}
 
-module.exports = async (req, res) => {
-  res.setHeader("Cache-Control", "no-store");
+  let history = [];                       // {role: "user" | "model", text}
+  let muted = store.get("jarvis-muted") === "1";
+  let rec = null, listening = false, busy = false, voice = null, unlocked = false;
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Metode tidak diizinkan" });
+  const labels = {
+    idle: "online nih",
+    listening: "dengerin kamu...",
+    thinking: "bentar, lagi mikir...",
+    speaking: "lagi ngomong...",
+  };
+  function setState(s) {
+    document.body.dataset.state = s;
+    $("#status").textContent = labels[s];
   }
 
-  // PIN akses (opsional tapi sangat disarankan agar orang lain tidak memakai kuota-mu)
-  const pin = process.env.ACCESS_PIN;
-  if (pin && req.headers["x-access-pin"] !== pin) {
-    return res.status(401).json({ error: "PIN salah" });
+  /* ---------- Suara keluar ---------- */
+  const hasTTS = "speechSynthesis" in window;
+  function pickVoice() {
+    if (!hasTTS) return;
+    const vs = speechSynthesis.getVoices();
+    voice = vs.find((v) => v.lang.replace("_", "-").toLowerCase() === "id-id")
+         || vs.find((v) => v.lang.toLowerCase().startsWith("id"))
+         || null;
+  }
+  if (hasTTS) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+
+  // iOS hanya mengizinkan suara jika pertama kali dipicu oleh sentuhan pengguna
+  function unlockSpeech() {
+    if (unlocked || !hasTTS) return;
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    speechSynthesis.speak(u);
+    unlocked = true;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res
-      .status(500)
-      .json({ error: "GEMINI_API_KEY belum diisi di pengaturan Vercel" });
-  }
-
-  // Validasi dan rapikan riwayat percakapan
-  const mentah = req.body && Array.isArray(req.body.messages) ? req.body.messages : [];
-  const contents = mentah
-    .slice(-19)
-    .filter(
-      (m) =>
-        m &&
-        (m.role === "user" || m.role === "model") &&
-        typeof m.text === "string" &&
-        m.text.trim()
-    )
-    .map((m) => ({ role: m.role, parts: [{ text: m.text.slice(0, 2000) }] }));
-
-  while (contents.length && contents[0].role !== "user") contents.shift();
-  if (!contents.length || contents[contents.length - 1].role !== "user") {
-    return res.status(400).json({ error: "Pesan tidak valid" });
-  }
-
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-
-  // GEMINI_THINKING: low (bawaan, cepat) | medium | high | off (pakai bawaan model)
-  const levelMentah = (process.env.GEMINI_THINKING || "low").trim().toLowerCase();
-  const level = ["off", "none", "default"].includes(levelMentah) ? "" : levelMentah;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:generateContent`;
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), BATAS_WAKTU_MS);
-
-  const panggil = async (body) => {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
+  function speak(text) {
+    return new Promise((resolve) => {
+      if (muted || !hasTTS) return resolve();
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text.replace(/[*_`#>]/g, "").replace(/K\.0/g, "ka nol"));
+      u.lang = LANG;
+      u.rate = 1.05;
+      if (voice) u.voice = voice;
+      u.onend = u.onerror = () => resolve();
+      setState("speaking");
+      speechSynthesis.speak(u);
     });
-    const data = await r.json().catch(() => ({}));
-    return { r, data };
-  };
-
-  try {
-    let { r, data } = await panggil(buatBody(contents, level));
-
-    // Jika model tidak mengenal pengaturan thinking, coba lagi tanpa pengaturan itu
-    if (!r.ok && r.status === 400 && level && /thinking/i.test(JSON.stringify(data.error || {}))) {
-      ({ r, data } = await panggil(buatBody(contents, "")));
-    }
-
-    if (!r.ok) {
-      const pesan =
-        (data.error && data.error.message) || "Gemini error " + r.status;
-      return res.status(502).json({ error: pesan });
-    }
-
-    const parts =
-      data.candidates && data.candidates[0] && data.candidates[0].content
-        ? data.candidates[0].content.parts || []
-        : [];
-    const reply = parts.map((p) => p.text || "").join("").trim();
-    return res
-      .status(200)
-      .json({ reply: reply || "Maaf, aku tidak bisa menjawab itu." });
-  } catch (e) {
-    if (e && e.name === "AbortError") {
-      return res
-        .status(504)
-        .json({ error: "Gemini terlalu lama menjawab. Coba lagi sebentar." });
-    }
-    return res.status(502).json({ error: "Tidak bisa menghubungi Gemini" });
-  } finally {
-    clearTimeout(timer);
   }
-};
+
+  /* ---------- Tampilan chat ---------- */
+  function addMsg(role, text, links = []) {
+    const hint = $("#hint"); if (hint) hint.remove();
+    const el = document.createElement("div");
+    el.className = "msg " + role;
+    const p = document.createElement("p");
+    p.textContent = text;
+    el.append(p);
+    for (const l of links) {
+      const a = document.createElement("a");
+      a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = l.label;
+      el.append(a);
+    }
+    const log = $("#log");
+    log.append(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  /* ---------- Perintah lokal (tanpa AI) ---------- */
+  function localCommand(t) {
+    const q = t.toLowerCase().trim();
+    const now = new Date();
+
+    if (/(jam berapa|pukul berapa|waktu sekarang|sekarang jam)/.test(q)) {
+      return { reply: "Sekarang jam " + now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) + " nih." };
+    }
+    if (/(tanggal berapa|hari apa|tanggal hari ini)/.test(q)) {
+      return { reply: "Hari ini " + now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + "." };
+    }
+    if (/(lupakan|reset|lupain) (percakapan|obrolan)/.test(q)) {
+      return { reply: "Oke, obrolan tadi aku lupain. Mulai dari nol lagi ya.", reset: true };
+    }
+    if (q.includes("buka youtube")) {
+      return { reply: "Nih, tinggal klik tombolnya.", links: [{ label: "Buka YouTube", url: "https://www.youtube.com" }] };
+    }
+    if (q.includes("buka google")) {
+      return { reply: "Nih, tinggal klik tombolnya.", links: [{ label: "Buka Google", url: "https://www.google.com" }] };
+    }
+    let m = q.match(/^(?:cari(?: di google)?|googling)\s+(.+)/);
+    if (m) {
+      return { reply: `Oke, ini hasil pencarian buat ${m[1]}.`, links: [{ label: "Buka di Google", url: "https://www.google.com/search?q=" + encodeURIComponent(m[1]) }] };
+    }
+    m = q.match(/^putar\s+(.+)/);
+    if (m) {
+      return { reply: `Siap, ini hasil YouTube buat ${m[1]}.`, links: [{ label: "Buka di YouTube", url: "https://www.youtube.com/results?search_query=" + encodeURIComponent(m[1]) }] };
+    }
+    return null;
+  }
+
+  /* ---------- Otak AI (lewat server) ---------- */
+  function callServer() {
+    return fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Access-Pin": store.get("jarvis-pin") || "" },
+      body: JSON.stringify({ messages: history.slice(-19) }),
+    });
+  }
+
+  async function getReply() {
+    let res = await callServer();
+    if (res.status === 401) {
+      const pin = window.prompt("Masukin PIN akses K.0 dulu ya:");
+      if (!pin) return "Butuh PIN dulu biar bisa ngobrol sama aku.";
+      store.set("jarvis-pin", pin.trim());
+      res = await callServer();
+      if (res.status === 401) { store.set("jarvis-pin", ""); return "PIN-nya salah nih. Coba lagi ya."; }
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Server error " + res.status);
+    return data.reply;
+  }
+
+  /* ---------- Alur satu percakapan ---------- */
+  async function handle(raw) {
+    if (busy) return;
+    busy = true;
+    const text = raw.replace(WAKE, "").trim();
+    addMsg("user", raw);
+    try {
+      let reply, links = [];
+      if (!text) {
+        reply = "Yo, ada apa nih?";
+      } else {
+        const local = localCommand(text);
+        if (local) {
+          reply = local.reply; links = local.links || [];
+          if (local.reset) history = [];
+        } else {
+          setState("thinking");
+          const wait = addMsg("bot", "...");
+          wait.classList.add("wait");
+          history.push({ role: "user", text });
+          try {
+            reply = await getReply();
+            history.push({ role: "model", text: reply });
+          } catch (e) {
+            history.pop();
+            throw e;
+          } finally {
+            wait.remove();
+          }
+        }
+      }
+      addMsg("bot", reply, links);
+      await speak(reply);
+    } catch (e) {
+      addMsg("system", "Waduh, ada masalah: " + e.message);
+    } finally {
+      busy = false;
+      if (document.body.dataset.state !== "listening") setState("idle");
+    }
+  }
+
+  /* ---------- Suara masuk ---------- */
+  function startListening() {
+    if (!SR) return;
+    if (document.body.dataset.state === "thinking") return;
+    unlockSpeech();
+    if (hasTTS) speechSynthesis.cancel();
+
+    let finalText = "", interimText = "";
+    rec = new SR();
+    rec.lang = LANG;
+    rec.interimResults = true;
+    rec.continuous = false;
+
+    rec.onstart = () => { listening = true; setState("listening"); $("#mic").setAttribute("aria-label", "Berhenti dengerin"); };
+    rec.onresult = (e) => {
+      interimText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript; else interimText += r[0].transcript;
+      }
+      $("#live").textContent = finalText || interimText;
+    };
+    rec.onerror = (e) => {
+      const pesan = {
+        "not-allowed": "Izin mic-nya ditolak nih. Izinkan mikrofon buat situs ini ya. Di iPhone, pastikan Dikte nyala (Pengaturan > Umum > Papan Ketik > Aktifkan Dikte).",
+        "service-not-allowed": "Pengenalan suara belum diizinkan. Di iPhone, nyalain Dikte (Pengaturan > Umum > Papan Ketik) dan Siri dulu ya.",
+        "no-speech": "Hmm, aku nggak denger apa-apa. Coba lagi ya.",
+        "network": "Internetnya lagi bermasalah nih, suaramu nggak bisa diproses.",
+        "audio-capture": "Mikrofonnya nggak kedeteksi.",
+      }[e.error];
+      if (pesan) addMsg("system", pesan);
+    };
+    rec.onend = () => {
+      listening = false;
+      $("#mic").setAttribute("aria-label", "Mulai ngomong");
+      $("#live").textContent = "";
+      const heard = (finalText || interimText).trim();
+      if (heard) handle(heard);
+      else if (document.body.dataset.state === "listening") setState("idle");
+    };
+
+    try { rec.start(); } catch { /* sudah berjalan */ }
+  }
+
+  /* ---------- Tombol & form ---------- */
+  $("#mic").addEventListener("click", () => {
+    if (listening && rec) { rec.stop(); return; }
+    startListening();
+  });
+
+  $("#form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#text");
+    const v = input.value.trim();
+    if (!v) return;
+    input.value = "";
+    unlockSpeech();
+    handle(v);
+  });
+
+  document.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (chip) { unlockSpeech(); handle(chip.dataset.q); }
+  });
+
+  function renderMute() {
+    const b = $("#mute");
+    b.setAttribute("aria-pressed", String(muted));
+    b.setAttribute("aria-label", muted ? "Nyalain suara jawaban" : "Matiin suara jawaban");
+    b.querySelector(".wave").style.display = muted ? "none" : "";
+  }
+  $("#mute").addEventListener("click", () => {
+    muted = !muted;
+    store.set("jarvis-muted", muted ? "1" : "0");
+    if (muted && hasTTS) speechSynthesis.cancel();
+    renderMute();
+  });
+  renderMute();
+
+  $("#reset").addEventListener("click", () => {
+    history = [];
+    if (hasTTS) speechSynthesis.cancel();
+    addMsg("system", "Obrolan baru dimulai. Fresh!");
+  });
+
+  if (!SR) {
+    $("#mic").disabled = true;
+    $("#mic").setAttribute("aria-label", "Input suara tidak tersedia");
+    addMsg("system", "Browser ini belum support input suara. Pakai Safari atau Chrome, atau ketik aja ya.");
+  }
+})();
+</script>
+</body>
+</html>
