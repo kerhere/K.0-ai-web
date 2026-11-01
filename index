@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050b16">
+<title>JARVIS</title>
+<style>
+  :root {
+    --bg: #050b16;
+    --panel: #0a1627;
+    --line: #15304d;
+    --text: #dff6ff;
+    --dim: #7fa3bf;
+    --c: #22d3ee;
+  }
+  body[data-state="listening"] { --c: #34d399; }
+  body[data-state="thinking"]  { --c: #fbbf24; }
+  body[data-state="speaking"]  { --c: #60a5fa; }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+    color: var(--text);
+    background: radial-gradient(120% 70% at 50% 0%, #0b2038 0%, var(--bg) 62%);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px 0;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .32em;
+    color: var(--c);
+    transition: color .4s;
+  }
+  .tools { display: flex; gap: 8px; }
+  .icon-btn {
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    background: transparent;
+    color: var(--dim);
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--c); }
+  .icon-btn[aria-pressed="true"] { color: #fca5a5; border-color: #7f1d1d; }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  /* ---------- Orb ---------- */
+  .stage {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    padding: 8px 0 4px;
+  }
+  .orb {
+    position: relative;
+    width: min(40vw, 30dvh, 190px);
+    aspect-ratio: 1;
+  }
+  .ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: var(--c);
+    border-bottom-color: color-mix(in srgb, var(--c) 35%, transparent);
+    animation: spin 7s linear infinite;
+    transition: border-color .4s;
+  }
+  .ring.r2 { inset: 11%; animation-duration: 4.5s; animation-direction: reverse;
+             border-top-color: transparent; border-left-color: var(--c); border-right-color: color-mix(in srgb, var(--c) 35%, transparent); }
+  .ring.r3 { inset: 22%; animation-duration: 3s; border-width: 3px; }
+  .core {
+    position: absolute;
+    inset: 33%;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff 0%, var(--c) 38%, transparent 72%);
+    box-shadow: 0 0 36px var(--c), 0 0 90px color-mix(in srgb, var(--c) 45%, transparent);
+    animation: pulse 3.2s ease-in-out infinite;
+    transition: background .4s, box-shadow .4s;
+  }
+  body[data-state="listening"] .core { animation-duration: 1.1s; }
+  body[data-state="speaking"]  .core { animation-duration: .6s; }
+  body[data-state="thinking"]  .ring { animation-duration: 1.6s; }
+  body[data-state="thinking"]  .ring.r2 { animation-duration: 1.1s; }
+
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { transform: scale(.88); opacity: .85; } 50% { transform: scale(1.08); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ring, .core { animation: none !important; }
+  }
+
+  #status {
+    font-size: 12px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    min-height: 18px;
+  }
+  #live {
+    min-height: 22px;
+    max-width: 90%;
+    text-align: center;
+    color: var(--text);
+    font-style: italic;
+    opacity: .85;
+  }
+
+  /* ---------- Chat ---------- */
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg {
+    max-width: 86%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    overflow-wrap: anywhere;
+  }
+  .msg p { margin: 0; }
+  .msg.user { align-self: flex-end; border-color: color-mix(in srgb, var(--c) 55%, var(--line)); border-bottom-right-radius: 4px; }
+  .msg.jarvis { align-self: flex-start; border-bottom-left-radius: 4px; }
+  .msg.system { align-self: center; max-width: 94%; background: transparent; border-style: dashed; color: var(--dim); font-size: 14px; text-align: center; }
+  .msg.wait p { letter-spacing: .3em; color: var(--dim); animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .msg a {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--c);
+    border-radius: 999px;
+    color: var(--c);
+    text-decoration: none;
+    font-size: 14px;
+  }
+
+  #hint { margin: auto; text-align: center; color: var(--dim); max-width: 340px; }
+  #hint p { margin: 0 0 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .chip {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .chip:hover { border-color: var(--c); }
+
+  /* ---------- Kontrol bawah ---------- */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--line);
+    background: rgba(5, 11, 22, .85);
+  }
+  form { flex: 1; display: flex; gap: 8px; margin: 0; }
+  input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 12px 16px;
+    font: inherit;
+    font-size: 16px; /* 16px mencegah iOS memperbesar layar saat mengetik */
+  }
+  input[type="text"]::placeholder { color: var(--dim); }
+  input[type="text"]:focus { outline: none; border-color: var(--c); }
+  .send { width: 46px; height: 46px; flex: none; color: var(--text); }
+
+  #mic {
+    flex: none;
+    width: 68px; height: 68px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    border: 2px solid var(--c);
+    background: color-mix(in srgb, var(--c) 14%, var(--panel));
+    color: var(--c);
+    cursor: pointer;
+    transition: border-color .4s, color .4s, background .4s, transform .15s;
+  }
+  #mic:active { transform: scale(.94); }
+  #mic svg { width: 30px; height: 30px; }
+  #mic .stop { display: none; }
+  body[data-state="listening"] #mic .mic-i { display: none; }
+  body[data-state="listening"] #mic .stop { display: block; }
+  #mic:disabled { opacity: .4; cursor: not-allowed; }
+
+  button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+</style>
+</head>
+<body data-state="idle">
+
+<header>
+  <h1>JARVIS</h1>
+  <div class="tools">
+    <button class="icon-btn" id="mute" type="button" aria-pressed="false" aria-label="Matikan suara jawaban" title="Suara jawaban">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4z"/><path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
+    </button>
+    <button class="icon-btn" id="reset" type="button" aria-label="Mulai percakapan baru" title="Percakapan baru">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<section class="stage" aria-hidden="false">
+  <div class="orb" aria-hidden="true">
+    <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core"></div>
+  </div>
+  <div id="status" role="status">Siaga</div>
+  <div id="live" aria-live="polite"></div>
+</section>
+
+<main id="log" aria-live="polite" aria-label="Percakapan">
+  <div id="hint">
+    <p>Tekan tombol mikrofon lalu bicara, atau ketik pesan di bawah.</p>
+    <div class="chips">
+      <button class="chip" type="button" data-q="Jam berapa sekarang?">Jam berapa sekarang?</button>
+      <button class="chip" type="button" data-q="Ceritakan fakta menarik tentang luar angkasa">Fakta luar angkasa</button>
+      <button class="chip" type="button" data-q="Cari resep nasi goreng">Cari resep nasi goreng</button>
+    </div>
+  </div>
+</main>
+
+<div class="controls">
+  <form id="form" autocomplete="off">
+    <input type="text" id="text" placeholder="Ketik pesan..." enterkeyhint="send" aria-label="Pesan untuk Jarvis">
+    <button class="icon-btn send" type="submit" aria-label="Kirim">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m5 12 14-7-5 14-2-5z"/>
+      </svg>
+    </button>
+  </form>
+  <button id="mic" type="button" aria-label="Mulai bicara">
+    <svg class="mic-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
+    </svg>
+    <svg class="stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+  </button>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const LANG = "id-ID";
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  let history = [];                       // {role: "user" | "model", text}
+  let muted = store.get("jarvis-muted") === "1";
+  let rec = null, listening = false, busy = false, voice = null, unlocked = false;
+
+  const labels = { idle: "Siaga", listening: "Mendengarkan...", thinking: "Berpikir...", speaking: "Berbicara..." };
+  function setState(s) {
+    document.body.dataset.state = s;
+    $("#status").textContent = labels[s];
+  }
+
+  /* ---------- Suara keluar ---------- */
+  const hasTTS = "speechSynthesis" in window;
+  function pickVoice() {
+    if (!hasTTS) return;
+    const vs = speechSynthesis.getVoices();
+    voice = vs.find((v) => v.lang.replace("_", "-").toLowerCase() === "id-id")
+         || vs.find((v) => v.lang.toLowerCase().startsWith("id"))
+         || null;
+  }
+  if (hasTTS) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+
+  // iOS hanya mengizinkan suara jika pertama kali dipicu oleh sentuhan pengguna
+  function unlockSpeech() {
+    if (unlocked || !hasTTS) return;
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    speechSynthesis.speak(u);
+    unlocked = true;
+  }
+
+  function speak(text) {
+    return new Promise((resolve) => {
+      if (muted || !hasTTS) return resolve();
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text.replace(/[*_`#>]/g, ""));
+      u.lang = LANG;
+      if (voice) u.voice = voice;
+      u.onend = u.onerror = () => resolve();
+      setState("speaking");
+      speechSynthesis.speak(u);
+    });
+  }
+
+  /* ---------- Tampilan chat ---------- */
+  function addMsg(role, text, links = []) {
+    const hint = $("#hint"); if (hint) hint.remove();
+    const el = document.createElement("div");
+    el.className = "msg " + role;
+    const p = document.createElement("p");
+    p.textContent = text;
+    el.append(p);
+    for (const l of links) {
+      const a = document.createElement("a");
+      a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = l.label;
+      el.append(a);
+    }
+    const log = $("#log");
+    log.append(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  /* ---------- Perintah lokal (tanpa AI) ---------- */
+  function localCommand(t) {
+    const q = t.toLowerCase().trim();
+    const now = new Date();
+
+    if (/(jam berapa|pukul berapa|waktu sekarang)/.test(q)) {
+      return { reply: "Sekarang pukul " + now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) + "." };
+    }
+    if (/(tanggal berapa|hari apa|tanggal hari ini)/.test(q)) {
+      return { reply: "Hari ini " + now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + "." };
+    }
+    if (/(lupakan|reset) percakapan/.test(q)) {
+      return { reply: "Baik, percakapan kita sudah kulupakan.", reset: true };
+    }
+    if (q.includes("buka youtube")) {
+      return { reply: "Ini tautan ke YouTube.", links: [{ label: "Buka YouTube", url: "https://www.youtube.com" }] };
+    }
+    if (q.includes("buka google")) {
+      return { reply: "Ini tautan ke Google.", links: [{ label: "Buka Google", url: "https://www.google.com" }] };
+    }
+    let m = q.match(/^(?:cari(?: di google)?|googling)\s+(.+)/);
+    if (m) {
+      return { reply: `Ini hasil pencarian untuk ${m[1]}.`, links: [{ label: "Buka di Google", url: "https://www.google.com/search?q=" + encodeURIComponent(m[1]) }] };
+    }
+    m = q.match(/^putar\s+(.+)/);
+    if (m) {
+      return { reply: `Ini hasil YouTube untuk ${m[1]}.`, links: [{ label: "Buka di YouTube", url: "https://www.youtube.com/results?search_query=" + encodeURIComponent(m[1]) }] };
+    }
+    return null;
+  }
+
+  /* ---------- Otak AI (lewat server) ---------- */
+  function callServer() {
+    return fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Access-Pin": store.get("jarvis-pin") || "" },
+      body: JSON.stringify({ messages: history.slice(-19) }),
+    });
+  }
+
+  async function getReply() {
+    let res = await callServer();
+    if (res.status === 401) {
+      const pin = window.prompt("Masukkan PIN akses Jarvis:");
+      if (!pin) return "PIN diperlukan untuk memakai Jarvis.";
+      store.set("jarvis-pin", pin.trim());
+      res = await callServer();
+      if (res.status === 401) { store.set("jarvis-pin", ""); return "PIN salah. Coba lagi."; }
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Server error " + res.status);
+    return data.reply;
+  }
+
+  /* ---------- Alur satu percakapan ---------- */
+  async function handle(raw) {
+    if (busy) return;
+    busy = true;
+    const text = raw.replace(/^\s*jarvis[\s,.:!-]*/i, "").trim();
+    addMsg("user", raw);
+    try {
+      let reply, links = [];
+      if (!text) {
+        reply = "Ya, ada yang bisa dibantu?";
+      } else {
+        const local = localCommand(text);
+        if (local) {
+          reply = local.reply; links = local.links || [];
+          if (local.reset) history = [];
+        } else {
+          setState("thinking");
+          const wait = addMsg("jarvis", "...");
+          wait.classList.add("wait");
+          history.push({ role: "user", text });
+          try {
+            reply = await getReply();
+            history.push({ role: "model", text: reply });
+          } catch (e) {
+            history.pop();
+            throw e;
+          } finally {
+            wait.remove();
+          }
+        }
+      }
+      addMsg("jarvis", reply, links);
+      await speak(reply);
+    } catch (e) {
+      addMsg("system", "Gagal: " + e.message);
+    } finally {
+      busy = false;
+      const s = document.body.dataset.state;
+      if (s !== "listening") setState("idle");
+    }
+  }
+
+  /* ---------- Suara masuk ---------- */
+  function startListening() {
+    if (!SR) return;
+    if (document.body.dataset.state === "thinking") return;
+    unlockSpeech();
+    if (hasTTS) speechSynthesis.cancel();
+
+    let finalText = "", interimText = "";
+    rec = new SR();
+    rec.lang = LANG;
+    rec.interimResults = true;
+    rec.continuous = false;
+
+    rec.onstart = () => { listening = true; setState("listening"); $("#mic").setAttribute("aria-label", "Berhenti mendengarkan"); };
+    rec.onresult = (e) => {
+      interimText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript; else interimText += r[0].transcript;
+      }
+      $("#live").textContent = finalText || interimText;
+    };
+    rec.onerror = (e) => {
+      const pesan = {
+        "not-allowed": "Izin mikrofon ditolak. Izinkan mikrofon untuk situs ini, dan di iPhone pastikan Dikte aktif (Pengaturan > Umum > Papan Ketik > Aktifkan Dikte).",
+        "service-not-allowed": "Pengenalan suara tidak diizinkan. Di iPhone, aktifkan Dikte (Pengaturan > Umum > Papan Ketik) dan Siri.",
+        "no-speech": "Aku tidak mendengar apa-apa. Coba lagi.",
+        "network": "Koneksi internet bermasalah, suara tidak bisa diproses.",
+        "audio-capture": "Mikrofon tidak terdeteksi.",
+      }[e.error];
+      if (pesan) addMsg("system", pesan);
+    };
+    rec.onend = () => {
+      listening = false;
+      $("#mic").setAttribute("aria-label", "Mulai bicara");
+      $("#live").textContent = "";
+      const heard = (finalText || interimText).trim();
+      if (heard) handle(heard);
+      else if (document.body.dataset.state === "listening") setState("idle");
+    };
+
+    try { rec.start(); } catch { /* sudah berjalan */ }
+  }
+
+  /* ---------- Tombol & form ---------- */
+  $("#mic").addEventListener("click", () => {
+    if (listening && rec) { rec.stop(); return; }
+    startListening();
+  });
+
+  $("#form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#text");
+    const v = input.value.trim();
+    if (!v) return;
+    input.value = "";
+    unlockSpeech();
+    handle(v);
+  });
+
+  document.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (chip) { unlockSpeech(); handle(chip.dataset.q); }
+  });
+
+  function renderMute() {
+    const b = $("#mute");
+    b.setAttribute("aria-pressed", String(muted));
+    b.setAttribute("aria-label", muted ? "Nyalakan suara jawaban" : "Matikan suara jawaban");
+    b.querySelector(".wave").style.display = muted ? "none" : "";
+  }
+  $("#mute").addEventListener("click", () => {
+    muted = !muted;
+    store.set("jarvis-muted", muted ? "1" : "0");
+    if (muted && hasTTS) speechSynthesis.cancel();
+    renderMute();
+  });
+  renderMute();
+
+  $("#reset").addEventListener("click", () => {
+    history = [];
+    if (hasTTS) speechSynthesis.cancel();
+    addMsg("system", "Percakapan baru dimulai.");
+  });
+
+  if (!SR) {
+    $("#mic").disabled = true;
+    $("#mic").setAttribute("aria-label", "Input suara tidak tersedia");
+    addMsg("system", "Browser ini belum mendukung input suara. Gunakan Safari atau Chrome, atau ketik saja.");
+  }   
+})();
+</script>
+</body>
+</html>
