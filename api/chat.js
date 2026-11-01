@@ -6,6 +6,20 @@ const KEPRIBADIAN =
   "Jawab dalam bahasa Indonesia, singkat (maksimal 2-3 kalimat) karena jawabanmu " +
   "akan diucapkan lewat suara. Jangan gunakan emoji, tanda bintang, atau format markdown.";
 
+// Batas tunggu jawaban Gemini. Setelah itu server membalas dengan pesan error
+// (bukan menggantung selamanya).
+const BATAS_WAKTU_MS = 25000;
+
+function buatBody(contents, level) {
+  const body = {
+    system_instruction: { parts: [{ text: KEPRIBADIAN }] },
+    contents,
+  };
+  // "Tingkat berpikir" rendah membuat Gemini 3.x menjawab jauh lebih cepat.
+  if (level) body.generationConfig = { thinkingConfig: { thinkingLevel: level } };
+  return body;
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
 
@@ -44,27 +58,38 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: "Pesan tidak valid" });
   }
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+
+  // GEMINI_THINKING: low (bawaan, cepat) | medium | high | off (pakai bawaan model)
+  const levelMentah = (process.env.GEMINI_THINKING || "low").trim().toLowerCase();
+  const level = ["off", "none", "default"].includes(levelMentah) ? "" : levelMentah;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:generateContent`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), BATAS_WAKTU_MS);
+
+  const panggil = async (body) => {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    return { r, data };
+  };
 
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-        model
-      )}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: KEPRIBADIAN }] },
-          contents,
-        }),
-      }
-    );
+    let { r, data } = await panggil(buatBody(contents, level));
 
-    const data = await r.json().catch(() => ({}));
+    // Jika model tidak mengenal pengaturan thinking, coba lagi tanpa pengaturan itu
+    if (!r.ok && r.status === 400 && level && /thinking/i.test(JSON.stringify(data.error || {}))) {
+      ({ r, data } = await panggil(buatBody(contents, "")));
+    }
+
     if (!r.ok) {
       const pesan =
         (data.error && data.error.message) || "Gemini error " + r.status;
@@ -80,6 +105,13 @@ module.exports = async (req, res) => {
       .status(200)
       .json({ reply: reply || "Maaf, aku tidak bisa menjawab itu." });
   } catch (e) {
+    if (e && e.name === "AbortError") {
+      return res
+        .status(504)
+        .json({ error: "Gemini terlalu lama menjawab. Coba lagi sebentar." });
+    }
     return res.status(502).json({ error: "Tidak bisa menghubungi Gemini" });
+  } finally {
+    clearTimeout(timer);
   }
 };
