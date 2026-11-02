@@ -52,7 +52,7 @@ module.exports = async (req, res) => {
   contents.unshift({ role: "system", content: KEPRIBADIAN });
 
   // Gunakan Llama 3 ukuran 8B yang sangat cepat dan gratis dari Groq
-  const model = process.env.GROQ_MODEL || "mixtral-8x7b-32768";
+  const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
   const ctrl = new AbortController();
